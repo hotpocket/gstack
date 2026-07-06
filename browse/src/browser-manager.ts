@@ -520,11 +520,17 @@ export class BrowserManager {
       launchArgs.push(...headlessGpuArgs(process.platform, process.env));
     }
 
+    // Support custom Chromium binary via GSTACK_CHROMIUM_PATH env var, same as
+    // launchHeaded() below. Lets headless mode run on a system Chrome/Chromium
+    // when Playwright's bundled browser is unavailable (e.g. an OS release the
+    // pinned Playwright version refuses to install browsers on).
+    const executablePath = process.env.GSTACK_CHROMIUM_PATH || undefined;
+
     // XProtect self-heal wrapper (P0 #2554): a macOS definition update can
     // start SIGKILLing the pinned Chromium at spawn. On the classified
     // signature, clear quarantine on the Playwright cache + force-reinstall
-    // once, then retry this launch once. This headless path always uses the
-    // Playwright cache (no executablePath), so the heal is never scoped out.
+    // once, then retry this launch once. usesCustomExecutable scopes the heal
+    // out when GSTACK_CHROMIUM_PATH supplies the binary (see launchHeaded).
     this.browser = await launchWithXProtectHeal(() => chromium.launch({
       headless: useHeadless,
       // #2220: the daemon owns signal policy, not Playwright. Playwright's
@@ -543,9 +549,10 @@ export class BrowserManager {
       // on Linux root/CI/container, where the sandbox requires unprivileged user
       // namespaces that aren't available.
       chromiumSandbox: shouldEnableChromiumSandbox(),
+      ...(executablePath ? { executablePath } : {}),
       ...(launchArgs.length > 0 ? { args: launchArgs } : {}),
       ...(this.proxyConfig ? { proxy: this.proxyConfig } : {}),
-    }));
+    }), { usesCustomExecutable: Boolean(executablePath) });
 
     // Chromium disconnect → distinguish clean user-quit from crash. Both
     // events look identical to Playwright (one 'disconnected' fires), but
